@@ -1,5 +1,5 @@
 import React from "react";
-import produto from "../assets/img/produto.jpg";
+import produto1 from "../assets/img/produto1.jpeg";
 
 export default function Produto() {
     return (
@@ -19,7 +19,7 @@ export default function Produto() {
                       </div>
                       <div className="rounded-2xl overflow-hidden border border-slate-200 shadow-md h-64 sm:h-80 bg-white">
                         <img 
-                          src={produto}
+                          src={produto1}
                           alt="Tecido NO" 
                           className="w-full h-full object-cover" 
                         />

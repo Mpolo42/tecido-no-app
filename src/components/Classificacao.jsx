@@ -1,10 +1,9 @@
 import React from "react";
-import grau1 from '../assets/img/grau1.png';
-import grau2 from '../assets/img/grau2.png';
-import grau3 from '../assets/img/grau3.png';
-import grau4 from '../assets/img/grau4.png';
-import grau5 from '../assets/img/grau5.png';
-
+import grau1 from "../assets/img/grau1.png";
+import grau2 from "../assets/img/grau2.png";
+import grau3 from "../assets/img/grau3.png";
+import grau4 from "../assets/img/grau4.png";
+import grau5 from "../assets/img/grau5.png";
 export default function Classificação ( ) {
     return (
          <section id="classificacao" className="py-20 bg-white border-t border-slate-200">
