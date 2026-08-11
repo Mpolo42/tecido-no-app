@@ -33,15 +33,14 @@ export default function AppRoutes({
           />
         } 
       />
-      
-      {/* ROTA DA PÁGINA DE LOGIN */}
       <Route 
         path="/login" 
         element={session ? <Navigate to="/admin" replace /> : <Login />} 
       />
-
-      {/* ROTA DO PAINEL PROTEGIDO ADM */}
-      <Route path="/admin" element={<AdminDashboard />} />
+      <Route 
+        path="/admin" 
+        element={session ? <AdminDashboard session={session} /> : <Navigate to="/login" replace />} 
+      />
     </Routes>
   );
 }
