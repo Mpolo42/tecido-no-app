@@ -13,7 +13,7 @@ export default function Hero() {
             Pé Diabético: <br />Cuidados Essenciais
           </h1>
           <p className="text-purple-100 text-lg sm:text-xl mb-8 leading-relaxed max-w-xl">
-            Informação e cuidados para proteger seus pés. Previna complicações com orientações profissionais e produtos adequados[cite: 1, 3].
+            Informação e cuidados para proteger seus pés. Previna complicações com orientações profissionais e produtos adequados.
           </p>
           <div className="flex flex-wrap gap-4">
             <a href="#cuidados" className="bg-white hover:bg-slate-100 text-purple-950 font-bold px-8 py-3.5 rounded-xl shadow-lg transition">
