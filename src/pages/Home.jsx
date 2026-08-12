@@ -6,7 +6,7 @@ import Produto from '../components/Produto';
 import Classificacao from '../components/Classificacao';
 import FAQ from '../components/FAQ';
 
-import hero from '../assets/img/hero1.jpg';
+import hero from '../assets/img/pes.jpeg';
 import cuidepe from '../assets/img/cuidepe.jpg';
 import produto from '../assets/img/produto.jpg';
 import grau1 from '../assets/img/grau1.png';

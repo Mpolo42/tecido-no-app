@@ -19,7 +19,7 @@ export default function FAQ() {
             Perguntas Frequentes & Orientação
           </h2>
           <p className="mt-4 text-lg text-slate-600">
-            Tire suas dúvidas sobre o uso do curativo e como agir em cada etapa[cite: 1].
+            Tire suas dúvidas sobre o uso do curativo e como agir em cada etapa.
           </p>
         </div>
 
@@ -42,7 +42,7 @@ export default function FAQ() {
             </button>
             {aberto === 1 && (
               <div className="px-6 pb-6 text-slate-700 text-base leading-relaxed border-t border-slate-100 pt-4 bg-slate-50/50">
-                As gazes e ataduras externas (curativo secundário) precisam ser trocadas TODO DIA[cite: 1]. A cobertura cinza (Tecido-NO / curativo primário) fica em contato direto com o machucado e é trocada apenas se estiver muito molhada ou se a borda da ferida estiver esbranquiçada[cite: 1].
+                As gazes e ataduras externas (curativo secundário) precisam ser trocadas TODO DIA. A cobertura cinza (Tecido-NO / curativo primário) fica em contato direto com o machucado e é trocada apenas se estiver muito molhada ou se a borda da ferida estiver esbranquiçada.
               </div>
             )}
           </div>
@@ -63,7 +63,7 @@ export default function FAQ() {
             </button>
             {aberto === 2 && (
               <div className="px-6 pb-6 text-slate-700 text-base leading-relaxed border-t border-slate-100 pt-4 bg-slate-50/50">
-                O tempo máximo de uso do tecido é de até 7 dias, mas a orientação correta deve ser dada pelo seu profissional de saúde[cite: 1].
+                O tempo máximo de uso do tecido é de até 7 dias, mas a orientação correta deve ser dada pelo seu profissional de saúde.
               </div>
             )}
           </div>
@@ -84,7 +84,7 @@ export default function FAQ() {
             </button>
             {aberto === 3 && (
               <div className="px-6 pb-6 text-slate-700 text-base leading-relaxed border-t border-slate-100 pt-4 bg-slate-50/50">
-                NÃO REUTILIZE NUNCA![cite: 1] Lavar esses materiais não remove as bactérias e pode causar infecções graves ou piorar a ferida[cite: 1].
+                NÃO REUTILIZE NUNCA! Lavar esses materiais não remove as bactérias e pode causar infecções graves ou piorar a ferida.
               </div>
             )}
           </div>
@@ -105,7 +105,7 @@ export default function FAQ() {
             </button>
             {aberto === 4 && (
               <div className="px-6 pb-6 text-slate-700 text-base leading-relaxed border-t border-slate-100 pt-4 bg-slate-50/50">
-                O curativo NÃO PODE MOLHAR DE JEITO NENHUM[cite: 1]. Proteja o pé durante o banho colocando um saco plástico limpo ou filme plástico (PVC) bem vedado no tornozelo para a água com sabão não entrar[cite: 1].
+                O curativo NÃO PODE MOLHAR DE JEITO NENHUM. Proteja o pé durante o banho colocando um saco plástico limpo ou filme plástico (PVC) bem vedado no tornozelo para a água com sabão não entrar.
               </div>
             )}
           </div>
@@ -126,7 +126,7 @@ export default function FAQ() {
             </button>
             {aberto === 5 && (
               <div className="px-6 pb-6 text-slate-700 text-base leading-relaxed border-t border-slate-100 pt-4 bg-slate-50/50">
-                Procure ajuda imediatamente se notar: pele muito vermelha ou quente ao redor, mau cheiro, aumento da dor, saída de pus ou se a ferida estiver aumentando de tamanho[cite: 1].
+                Procure ajuda imediatamente se notar: pele muito vermelha ou quente ao redor, mau cheiro, aumento da dor, saída de pus ou se a ferida estiver aumentando de tamanho.
               </div>
             )}
           </div>

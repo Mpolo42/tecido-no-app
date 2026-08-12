@@ -11,7 +11,7 @@ export default function Cuidados() {
             Cuide Diariamente
           </h2>
           <p className="mt-4 text-lg text-slate-600">
-            Higiene, calçados adequados, controle glicêmico e visitas regulares ao médico[cite: 1].
+            Higiene, calçados adequados, controle glicêmico e visitas regulares ao médico.
           </p>
         </div>
 
@@ -23,27 +23,27 @@ export default function Cuidados() {
           <div className="space-y-4">
             <div className="flex items-start gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
               <CheckCircle2 className="w-6 h-6 text-purple-600 flex-shrink-0 mt-0.5" />
-              <p className="text-base font-semibold text-slate-800">Lavar os pés diariamente com água morna e sabão neutro[cite: 1].</p>
+              <p className="text-base font-semibold text-slate-800">Lavar os pés diariamente com água morna e sabão neutro.</p>
             </div>
             <div className="flex items-start gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
               <CheckCircle2 className="w-6 h-6 text-purple-600 flex-shrink-0 mt-0.5" />
-              <p className="text-base font-semibold text-slate-800">Secar bem entre os dedos para evitar fungos e frieiras[cite: 1].</p>
+              <p className="text-base font-semibold text-slate-800">Secar bem entre os dedos para evitar fungos e frieiras.</p>
             </div>
             <div className="flex items-start gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
               <CheckCircle2 className="w-6 h-6 text-purple-600 flex-shrink-0 mt-0.5" />
-              <p className="text-base font-semibold text-slate-800">Usar calçados confortáveis e macios, evitando pontos de pressão[cite: 1].</p>
+              <p className="text-base font-semibold text-slate-800">Usar calçados confortáveis e macios, evitando pontos de pressão.</p>
             </div>
             <div className="flex items-start gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
               <CheckCircle2 className="w-6 h-6 text-purple-600 flex-shrink-0 mt-0.5" />
-              <p className="text-base font-semibold text-slate-800">Inspecionar seus pés todos os dias com auxílio de um espelho[cite: 1].</p>
+              <p className="text-base font-semibold text-slate-800">Inspecionar seus pés todos os dias com auxílio de um espelho.</p>
             </div>
             <div className="flex items-start gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
               <CheckCircle2 className="w-6 h-6 text-purple-600 flex-shrink-0 mt-0.5" />
-              <p className="text-base font-semibold text-slate-800">Manter o controle rigoroso da glicemia no sangue[cite: 1].</p>
+              <p className="text-base font-semibold text-slate-800">Manter o controle rigoroso da glicemia no sangue.</p>
             </div>
             <div className="flex items-start gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
               <CheckCircle2 className="w-6 h-6 text-purple-600 flex-shrink-0 mt-0.5" />
-              <p className="text-base font-semibold text-slate-800">Visitar seu médico especialista regularmente[cite: 1].</p>
+              <p className="text-base font-semibold text-slate-800">Visitar seu médico especialista regularmente.</p>
             </div>
           </div>
         </div>
