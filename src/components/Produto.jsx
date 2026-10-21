@@ -1,4 +1,4 @@
-import React from "react";
+import { Link } from 'react-router-dom';
 import produto1 from "../assets/img/produto1.jpeg";
 
 export default function Produto() {
@@ -13,15 +13,15 @@ export default function Produto() {
                         <p className="text-lg text-slate-600 leading-relaxed mb-8">
                           Desenvolvemos produtos especializados para o cuidado do pé diabético, com tecnologia de ponta em fibra de carvão liberadora de óxido nítrico (NO) que promove cicatrização e proteção.
                         </p>
-                        <a href="#cadastro" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-8 py-3.5 rounded-xl shadow-md transition inline-block">
-                          Saiba Mais
-                        </a>
+                        <Link to="/cadastro" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-8 py-3.5 rounded-xl shadow-md transition inline-block">
+                          Fazer cadastro
+                        </Link>
                       </div>
                       <div className="rounded-2xl overflow-hidden border border-slate-200 shadow-md h-64 sm:h-80 bg-white">
-                        <img 
+                        <img
                           src={produto1}
-                          alt="Tecido NO" 
-                          className="w-full h-full object-cover" 
+                          alt="Tecido NO"
+                          className="w-full h-full object-cover"
                         />
                       </div>
                     </div>

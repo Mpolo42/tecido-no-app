@@ -1,4 +1,3 @@
-import React from 'react';
 import { CheckCircle2 } from 'lucide-react'; // <-- IMPORTANTE: use as chaves { CheckCircle2 }
 import cuidepe from '../assets/img/cuidepe.jpg';
 

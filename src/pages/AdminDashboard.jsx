@@ -1,401 +1,258 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Edit, FileImage, LogOut, Search, Trash2, X } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { LogOut, Users, FileImage, Search, Filter, MessageCircle, Edit, Trash2, X, Check } from 'lucide-react';
+import { validatePatient, formatPhone, SEX_OPTIONS, DIABETES_OPTIONS, LESION_OPTIONS, COMORBIDITY_OPTIONS } from '../lib/validation';
+
+const PAGE_SIZE = 20;
+const COLUMNS = 'id,nome,nome_social,whatsapp,sexo,idade,tipo_diabetes,comorbidades,grau_lesao,tempo_lesao,localizacao_quadrante,foto_path,foto_url,created_at,consent_version,consent_accepted_at';
+const inputClass = 'w-full px-3 py-3 rounded-xl border-2 border-slate-300 focus:outline-indigo-600 bg-white';
+
+function NativeDialog({ title, children, onCancel, busy }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    const previousFocus = document.activeElement;
+    dialog.showModal();
+    return () => { dialog.close(); if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus(); };
+  }, []);
+  return <dialog ref={ref} aria-labelledby="admin-dialog-title" aria-busy={busy} onCancel={(event) => { event.preventDefault(); if (!busy) onCancel(); }} className="w-[calc(100%-2rem)] max-w-2xl max-h-[90dvh] m-auto p-0 rounded-2xl border border-slate-300 shadow-2xl backdrop:bg-slate-900/60">
+    <div className="p-5 sm:p-7">
+      <div className="flex items-start justify-between gap-3 mb-5"><h2 id="admin-dialog-title" className="text-xl font-bold text-slate-900">{title}</h2><button type="button" autoFocus disabled={busy} aria-label="Fechar diálogo" onClick={onCancel} className="p-2 rounded-xl hover:bg-slate-100 disabled:opacity-50"><X aria-hidden="true" /></button></div>
+      {children}
+    </div>
+  </dialog>;
+}
+
+function EditField({ name, label, value, onChange, error, options, ...props }) {
+  const id = `edit-${name}`;
+  return <div><label htmlFor={id} className="block font-semibold mb-2">{label}</label>{options ? <select id={id} name={name} value={value ?? ''} onChange={onChange} aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : undefined} className={inputClass} {...props}><option value="">Selecione</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select> : <input id={id} name={name} value={value ?? ''} onChange={onChange} aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : undefined} className={inputClass} {...props} />}{error && <p id={`${id}-error`} className="text-rose-700 mt-2 text-sm">{error}</p>}</div>;
+}
+
+function photoPath(patient) {
+  let path = patient.foto_path;
+  if (!path && patient.foto_url) {
+    try {
+      const expected = new URL(import.meta.env.VITE_SUPABASE_URL);
+      const legacy = new URL(patient.foto_url);
+      const prefix = '/storage/v1/object/public/fotos-lesoes/';
+      if (legacy.origin !== expected.origin || legacy.protocol !== 'https:' || !legacy.pathname.startsWith(prefix)) return null;
+      path = decodeURIComponent(legacy.pathname.slice(prefix.length));
+    } catch { return null; }
+  }
+  if (typeof path !== 'string' || path.length > 500 || !/^[a-zA-Z0-9_./-]+$/.test(path) || path.split('/').some((part) => !part || part === '.' || part === '..')) return null;
+  return path;
+}
+
+async function adminAction(action, payload = {}) {
+  const { data, error } = await supabase.functions.invoke('patient-admin', { body: { action, ...payload } });
+  if (error || data?.ok !== true) {
+    const status = error?.context?.status || error?.status;
+    throw new Error(status === 401 || status === 403 ? 'Sua autorização expirou. Saia e entre novamente antes de tentar.' : 'Não foi possível confirmar a operação. Atualize a lista antes de tentar novamente.');
+  }
+  return data;
+}
 
 export default function AdminDashboard({ session }) {
-  const [pacientes, setPacientes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [busca, setBusca] = useState('');
-  
-  // Estados para Modal de Edição
-  const [pacienteEditando, setPacienteEditando] = useState(null);
-  const [formDataEdit, setFormDataEdit] = useState({});
-  const [salvando, setSalvando] = useState(false);
-
+  const [request, setRequest] = useState({ page: 1, term: '', revision: 0 });
+  const [view, setView] = useState(null);
+  const [search, setSearch] = useState('');
+  const [searchError, setSearchError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState({});
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [discard, setDiscard] = useState(false);
+  const [deleting, setDeleting] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(null);
+  const [photoLink, setPhotoLink] = useState(null);
+  const editForm = useRef(null);
   const navigate = useNavigate();
+  const key = `${request.page}:${request.term}:${request.revision}`;
+  const loading = view?.key !== key;
 
   useEffect(() => {
-    fetchPacientes();
-  }, []);
-
-  const fetchPacientes = async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('pacientes')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (!error && data) {
-      setPacientes(data);
+    const controller = new AbortController();
+    let active = true;
+    async function loadPatients() {
+      try {
+        let query = supabase.from('pacientes').select(COLUMNS, { count: 'exact' }).order('created_at', { ascending: false }).order('id', { ascending: false });
+        if (request.term) {
+          // Search terms are allowlisted before entering PostgREST's filter grammar.
+          const filters = [`nome.ilike.%${request.term}%`, `grau_lesao.ilike.%${request.term}%`];
+          if (/^[\d\s+-]+$/.test(request.term)) filters.push(`whatsapp.ilike.%${request.term.replace(/\D/g, '')}%`);
+          query = query.or(filters.join(','));
+        }
+        const { data, count, error: loadError } = await query.range((request.page - 1) * PAGE_SIZE, request.page * PAGE_SIZE - 1).abortSignal(controller.signal);
+        if (loadError) throw loadError;
+        if (!active) return;
+        const pages = Math.max(1, Math.ceil((count || 0) / PAGE_SIZE));
+        if (request.page > pages) { setRequest((previous) => ({ ...previous, page: pages })); return; }
+        setView({ key, patients: data || [], count: count || 0 });
+      } catch (loadError) {
+        if (!active || controller.signal.aborted) return;
+        setView({ key, patients: [], count: 0, error: loadError?.code === '42501' || loadError?.status === 401 ? 'Sua autorização expirou. Saia e entre novamente.' : 'Não foi possível carregar os pacientes. Verifique a conexão e tente novamente.' });
+      }
     }
-    setLoading(false);
+    loadPatients();
+    return () => { active = false; controller.abort(); };
+  }, [request.page, request.term, request.revision, key]);
+
+  useEffect(() => {
+    if (!photoLink) return;
+    const timeout = window.setTimeout(() => setPhotoLink(null), 55_000);
+    return () => window.clearTimeout(timeout);
+  }, [photoLink]);
+
+  const refresh = () => setRequest((previous) => ({ ...previous, revision: previous.revision + 1 }));
+  const searchPatients = (event) => {
+    event.preventDefault();
+    const term = search.normalize('NFKC').trim().replace(/\s+/g, ' ');
+    if (term.length > 80 || !/^[\p{L}\p{N}\s+-]*$/u.test(term) || (term && !/[\p{L}\p{N}]/u.test(term))) { setSearchError('Use até 80 letras ou números. Espaços, hífen e sinal de mais também são aceitos.'); return; }
+    setSearchError(''); setSearch(term);
+    setRequest((previous) => ({ page: 1, term, revision: previous.revision + 1 }));
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate('/login');
-  };
-
-  // --- AÇÃO DE EXCLUIR PACIENTE ---
-  const handleExcluir = async (id, nome) => {
-    const confirmacao = window.confirm(`Tem certeza que deseja excluir o cadastro de "${nome}"? Esta ação não pode ser desfeita.`);
-    
-    if (!confirmacao) return;
-
+  const logout = async () => {
+    setError(''); setBusy(true);
     try {
-      const { error } = await supabase
-        .from('pacientes')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-
-      // Remove localmente da lista sem precisar recarregar a página
-      setPacientes(prev => prev.filter(item => item.id !== id));
-      alert('Cadastro excluído com sucesso!');
-    } catch (error) {
-      alert('Erro ao excluir: ' + error.message);
-    }
+      const { error: logoutError } = await supabase.auth.signOut({ scope: 'local' });
+      if (logoutError) throw logoutError;
+      navigate('/login', { replace: true });
+    } catch { setError('Não foi possível sair. Verifique a conexão e tente novamente.'); }
+    finally { setBusy(false); }
   };
 
-  // --- AÇÕES DE EDIÇÃO ---
-  const handleAbrirEdicao = (paciente) => {
-    setPacienteEditando(paciente);
-    setFormDataEdit({
-      nome: paciente.nome || '',
-      nome_social: paciente.nome_social || '',
-      whatsapp: paciente.whatsapp || '',
-      sexo: paciente.sexo || '',
-      idade: paciente.idade || '',
-      tipo_diabetes: paciente.tipo_diabetes || '',
-      grau_lesao: paciente.grau_lesao || '',
-      tempo_lesao: paciente.tempo_lesao || '',
-      localizacao_quadrante: paciente.localizacao_quadrante || ''
-    });
+  const openEdit = (patient) => {
+    setEditing(patient); setDraft({ nome: patient.nome || '', nome_social: patient.nome_social || '', whatsapp: patient.whatsapp || '', sexo: patient.sexo || '', idade: patient.idade ?? '', tipo_diabetes: patient.tipo_diabetes || '', comorbidades: patient.comorbidades || [], grau_lesao: patient.grau_lesao || '', tempo_lesao: patient.tempo_lesao || '', localizacao_quadrante: patient.localizacao_quadrante || '' });
+    setFieldErrors({}); setError(''); setNotice(''); setDiscard(false);
   };
+  const closeEdit = () => { if (!busy) { setEditing(null); setDiscard(false); setError(''); } };
+  const requestCloseEdit = () => {
+    if (busy) return;
+    const changed = Object.keys(draft).some((field) => JSON.stringify(draft[field] ?? '') !== JSON.stringify(editing[field] ?? (field === 'comorbidades' ? [] : '')));
+    if (changed) setDiscard(true); else closeEdit();
+  };
+  const changeField = (event) => setDraft((previous) => ({ ...previous, [event.target.name]: event.target.value }));
 
-  const handleSalvarEdicao = async (e) => {
-    e.preventDefault();
-    setSalvando(true);
-
+  const saveEdit = async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    const { data, errors } = validatePatient(draft, { requireConsent: false, fieldStyle: 'snake' });
+    setFieldErrors(errors); setError('');
+    if (Object.keys(errors).length) { window.requestAnimationFrame(() => editForm.current?.querySelector('[aria-invalid="true"]')?.focus()); return; }
+    setBusy(true);
     try {
-      const { error } = await supabase
-        .from('pacientes')
-        .update({
-          nome: formDataEdit.nome,
-          nome_social: formDataEdit.nome_social || null,
-          whatsapp: formDataEdit.whatsapp ? formDataEdit.whatsapp.replace(/\D/g, '') : null,
-          sexo: formDataEdit.sexo,
-          idade: parseInt(formDataEdit.idade),
-          tipo_diabetes: formDataEdit.tipo_diabetes,
-          grau_lesao: formDataEdit.grau_lesao,
-          tempo_lesao: formDataEdit.tempo_lesao,
-          localizacao_quadrante: formDataEdit.localizacao_quadrante
-        })
-        .eq('id', pacienteEditando.id);
-
-      if (error) throw error;
-
-      alert('Cadastro atualizado com sucesso!');
-      setPacienteEditando(null);
-      fetchPacientes(); // Recarrega os dados atualizados
-    } catch (error) {
-      alert('Erro ao atualizar: ' + error.message);
-    } finally {
-      setSalvando(false);
-    }
+      await adminAction('update', { id: editing.id, patient: data });
+      setEditing(null); setNotice('Cadastro atualizado com sucesso.'); refresh();
+    } catch (saveError) { setError(saveError.message); }
+    finally { setBusy(false); }
   };
 
-  const pacientesFiltrados = pacientes.filter(p => 
-    p.nome?.toLowerCase().includes(busca.toLowerCase()) ||
-    p.grau_lesao?.toLowerCase().includes(busca.toLowerCase()) ||
-    p.whatsapp?.includes(busca)
-  );
+  const deletePatient = async () => {
+    if (busy) return;
+    setBusy(true); setError('');
+    try {
+      const result = await adminAction('delete', { id: deleting.id });
+      setDeleting(null);
+      setNotice(result.warning ? 'Cadastro excluído. A remoção de um arquivo ficou pendente; use “Concluir limpeza de arquivos” para tentar novamente.' : 'Cadastro e arquivo associado excluídos com sucesso.');
+      refresh();
+    } catch (deleteError) { setError(deleteError.message); }
+    finally { setBusy(false); }
+  };
 
-  return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* CABEÇALHO DO PAINEL */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 bg-white p-6 rounded-3xl border-2 border-slate-200 shadow-sm">
-        <div>
-          <h1 className="text-3xl font-extrabold text-slate-900 flex items-center gap-3">
-            <Users className="text-indigo-600 w-8 h-8" />
-            Painel do Administrador
-          </h1>
-          <p className="text-slate-600 text-sm mt-1">
-            Sessão ativa: <span className="font-semibold text-slate-800">{session?.user?.email}</span>
-          </p>
-        </div>
+  const cleanup = async () => {
+    if (cleanupBusy) return;
+    setCleanupBusy(true); setError(''); setNotice('');
+    try {
+      const result = await adminAction('cleanup');
+      setNotice(result.warning ? 'Ainda há arquivos pendentes. Tente concluir a limpeza novamente mais tarde.' : 'Limpeza de arquivos solicitada. As pendências elegíveis foram processadas.');
+    } catch (cleanupError) { setError(cleanupError.message); }
+    finally { setCleanupBusy(false); }
+  };
 
-        <button 
-          onClick={handleLogout}
-          className="bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold px-5 py-2.5 rounded-2xl border border-rose-200 transition flex items-center gap-2 w-fit cursor-pointer"
-        >
-          <LogOut className="w-5 h-5" />
-          Sair do Painel
-        </button>
+  const openPhoto = async (patient) => {
+    const path = photoPath(patient);
+    if (!path || photoBusy) { if (!path) setError('O caminho da foto não é válido. Solicite a revisão desse cadastro.'); return; }
+    const popup = window.open('about:blank', '_blank');
+    if (popup) popup.opener = null;
+    setPhotoBusy(patient.id); setError(''); setPhotoLink(null);
+    try {
+      const [{ data: assurance, error: assuranceError }, { data: allowed, error: accessError }] = await Promise.all([supabase.auth.mfa.getAuthenticatorAssuranceLevel(), supabase.rpc('admin_access')]);
+      if (assuranceError || accessError || allowed !== true || assurance?.currentLevel !== 'aal2') throw new Error('auth');
+      const { data, error: signedError } = await supabase.storage.from('fotos-lesoes').createSignedUrl(path, 60);
+      if (signedError || !data?.signedUrl) throw signedError || new Error('url');
+      const signed = new URL(data.signedUrl);
+      const expected = new URL(import.meta.env.VITE_SUPABASE_URL);
+      if (signed.origin !== expected.origin || signed.protocol !== 'https:') throw new Error('url');
+      if (popup && !popup.closed) popup.location.replace(signed.href);
+      else setPhotoLink({ url: signed.href });
+    } catch { if (popup && !popup.closed) popup.close(); setError('Não foi possível abrir a foto. Confira sua conexão e autorização; tente novamente.'); }
+    finally { setPhotoBusy(null); }
+  };
+
+  const patients = loading ? [] : view?.patients || [];
+  const pages = Math.max(1, Math.ceil((view?.count || 0) / PAGE_SIZE));
+
+  return <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 text-slate-800">
+    <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-7 bg-white p-5 rounded-2xl border border-slate-200">
+      <div><h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">Painel da equipe</h1><p className="text-sm text-slate-600 mt-2">Sessão protegida: {session?.user?.email}</p></div>
+      <button type="button" disabled={busy} onClick={logout} className="flex items-center gap-2 min-h-11 px-4 py-3 border rounded-xl text-rose-700 bg-rose-50 disabled:opacity-60"><LogOut aria-hidden="true" className="w-5 h-5" />Sair da conta</button>
+    </header>
+    {notice && <p role="status" className="mb-5 p-4 bg-emerald-50 text-emerald-800 rounded-xl">{notice}</p>}
+    {error && !editing && !deleting && <p role="alert" className="mb-5 p-4 bg-rose-50 text-rose-800 rounded-xl">{error}</p>}
+    {photoLink && <p role="status" className="mb-5 p-4 bg-indigo-50 rounded-xl">Seu navegador bloqueou a nova janela. <a href={photoLink.url} target="_blank" rel="noopener noreferrer" className="font-bold underline">Abrir foto com acesso temporário</a>. O link expira em menos de um minuto.</p>}
+    <form onSubmit={searchPatients} className="mb-6 flex flex-col sm:flex-row sm:items-end gap-3">
+      <div className="flex-1"><label htmlFor="patient-search" className="block font-semibold mb-2">Buscar por nome, grau da lesão ou telefone</label><input id="patient-search" type="search" maxLength={80} value={search} onChange={(event) => setSearch(event.target.value)} aria-invalid={Boolean(searchError)} aria-describedby={searchError ? 'search-error' : undefined} className={inputClass} />{searchError && <p id="search-error" role="alert" className="mt-2 text-rose-700">{searchError}</p>}</div>
+      <button type="submit" className="flex justify-center gap-2 rounded-xl px-5 py-3 bg-indigo-600 text-white font-bold min-h-12"><Search aria-hidden="true" className="w-5 h-5" />Buscar</button>
+      {request.term && <button type="button" onClick={() => { setSearch(''); setSearchError(''); setRequest((previous) => ({ page: 1, term: '', revision: previous.revision + 1 })); }} className="px-4 py-3 min-h-12 rounded-xl border border-slate-300">Limpar busca</button>}
+    </form>
+    {loading ? <p role="status" className="p-12 text-center">Carregando pacientes…</p> : view?.error ? <div role="alert" className="bg-rose-50 text-rose-800 p-6 rounded-xl"><p>{view.error}</p><button type="button" onClick={refresh} className="mt-4 min-h-11 underline font-semibold">Tentar novamente</button></div> : patients.length === 0 ? <p className="p-12 text-center border rounded-2xl bg-white">{request.term ? 'Nenhum paciente corresponde à busca.' : 'Nenhum paciente cadastrado.'}</p> : <>
+      <p role="status" className="mb-3 text-slate-600">{view.count} {view.count === 1 ? 'cadastro encontrado' : 'cadastros encontrados'} · Página {request.page} de {pages}</p>
+      <div role="region" aria-label="Pacientes cadastrados; role horizontalmente em telas pequenas" tabIndex={0} className="overflow-x-auto border border-slate-200 rounded-2xl bg-white focus:outline-indigo-600">
+        <table className="w-full text-left min-w-[960px]"><caption className="sr-only">Pacientes, informações clínicas e ações da equipe</caption><thead className="bg-slate-100"><tr>{['Paciente', 'Contato', 'Idade / sexo', 'Diabetes', 'Lesão', 'Localização', 'Ações'].map((label) => <th key={label} scope="col" className="p-4 text-sm">{label}</th>)}</tr></thead>
+          <tbody className="divide-y divide-slate-200">{patients.map((patient) => <tr key={patient.id} className="align-top hover:bg-slate-50">
+            <th scope="row" className="p-4 font-semibold"><span className="block">{patient.nome}</span>{patient.nome_social && <span className="block text-sm font-normal text-indigo-700">Nome social: {patient.nome_social}</span>}</th>
+            <td className="p-4">{patient.whatsapp && /^\d{10,11}$/.test(patient.whatsapp) ? <a href={`https://wa.me/55${patient.whatsapp}`} target="_blank" rel="noopener noreferrer" className="text-emerald-800 underline">{formatPhone(patient.whatsapp)}</a> : patient.whatsapp || 'Não informado'}</td>
+            <td className="p-4">{patient.idade} anos / {patient.sexo}</td><td className="p-4">{patient.tipo_diabetes}</td><td className="p-4"><span className="font-semibold">{patient.grau_lesao}</span><span className="block text-sm text-slate-600">{patient.tempo_lesao}</span></td><td className="p-4">{patient.localizacao_quadrante}</td>
+            <td className="p-3"><div className="flex gap-1 flex-wrap">
+              {(patient.foto_path || patient.foto_url) && <button type="button" onClick={() => openPhoto(patient)} disabled={photoBusy !== null} aria-label={`Ver foto de ${patient.nome}`} className="min-w-11 min-h-11 p-3 text-indigo-700 rounded-xl hover:bg-indigo-50 disabled:opacity-50"><FileImage aria-hidden="true" className="w-5 h-5" /></button>}
+              <button type="button" onClick={() => openEdit(patient)} aria-label={`Editar cadastro de ${patient.nome}`} className="min-w-11 min-h-11 p-3 text-indigo-700 rounded-xl hover:bg-indigo-50"><Edit aria-hidden="true" className="w-5 h-5" /></button>
+              <button type="button" onClick={() => { setDeleting(patient); setError(''); setNotice(''); }} aria-label={`Excluir cadastro de ${patient.nome}`} className="min-w-11 min-h-11 p-3 text-rose-700 rounded-xl hover:bg-rose-50"><Trash2 aria-hidden="true" className="w-5 h-5" /></button>
+            </div></td>
+          </tr>)}</tbody>
+        </table>
       </div>
+      <nav aria-label="Páginas de pacientes" className="mt-5 flex justify-between items-center gap-3"><button type="button" disabled={request.page === 1} onClick={() => setRequest((previous) => ({ ...previous, page: previous.page - 1 }))} className="min-h-11 border rounded-xl px-4 py-3 disabled:opacity-40">Anterior</button><span>Página {request.page} de {pages}</span><button type="button" disabled={request.page >= pages} onClick={() => setRequest((previous) => ({ ...previous, page: previous.page + 1 }))} className="min-h-11 border rounded-xl px-4 py-3 disabled:opacity-40">Próxima</button></nav>
+    </>}
+    <div className="mt-8 pt-5 border-t border-slate-200 flex flex-wrap gap-4"><button type="button" onClick={refresh} disabled={loading} className="min-h-11 underline text-indigo-700 disabled:opacity-50">Atualizar lista</button><button type="button" disabled={cleanupBusy} onClick={cleanup} className="min-h-11 underline text-slate-600 disabled:opacity-50">{cleanupBusy ? 'Concluindo limpeza…' : 'Concluir limpeza de arquivos'}</button></div>
 
-      {/* BARRA DE PESQUISA */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <div className="relative flex-1">
-          <Search className="w-5 h-5 absolute left-4 top-3.5 text-slate-400" />
-          <input 
-            type="text" 
-            placeholder="Buscar por nome, WhatsApp ou grau da lesão..." 
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 bg-white rounded-2xl border-2 border-slate-200 focus:border-indigo-600 focus:outline-none text-sm shadow-sm"
-          />
-        </div>
-        <div className="flex items-center gap-2 bg-white px-4 py-3 rounded-2xl border-2 border-slate-200 text-slate-700 text-sm font-bold shadow-sm">
-          <Filter className="w-4 h-4 text-indigo-600" />
-          <span>Total: {pacientesFiltrados.length} Cadastros</span>
-        </div>
-      </div>
-
-      {/* TABELA DE PACIENTES */}
-      {loading ? (
-        <div className="text-center py-20 text-slate-500 font-bold">Carregando dados do Supabase...</div>
-      ) : pacientesFiltrados.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-3xl border-2 border-slate-200 text-slate-500 font-medium">
-          Nenhum paciente encontrado.
-        </div>
-      ) : (
-        <div className="bg-white rounded-3xl border-2 border-slate-200 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 text-xs uppercase font-extrabold tracking-wider">
-                  <th className="p-4">Paciente</th>
-                  <th className="p-4">Contato (WhatsApp)</th>
-                  <th className="p-4">Idade / Sexo</th>
-                  <th className="p-4">Diabetes</th>
-                  <th className="p-4">Lesão</th>
-                  <th className="p-4">Localização</th>
-                  <th className="p-4">Foto</th>
-                  <th className="p-4 text-center">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 text-sm">
-                {pacientesFiltrados.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50 transition">
-                    <td className="p-4">
-                      <div className="font-bold text-slate-900 text-base">{item.nome}</div>
-                      {item.nome_social && <div className="text-xs text-indigo-600 font-medium">Social: {item.nome_social}</div>}
-                    </td>
-                    <td className="p-4">
-                      {item.whatsapp ? (
-                        <a 
-                          href={`https://wa.me/55${item.whatsapp.replace(/\D/g, '')}`} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold px-3 py-1.5 rounded-xl border border-emerald-200 text-xs transition"
-                        >
-                          <MessageCircle className="w-4 h-4 text-emerald-600" />
-                          {item.whatsapp}
-                        </a>
-                      ) : (
-                        <span className="text-slate-400 text-xs font-medium">Não informado</span>
-                      )}
-                    </td>
-                    <td className="p-4 text-slate-700 font-medium">
-                      {item.idade} anos ({item.sexo})
-                    </td>
-                    <td className="p-4 font-semibold text-slate-800">
-                      {item.tipo_diabetes}
-                    </td>
-                    <td className="p-4">
-                      <span className="inline-block px-3 py-1 rounded-xl text-xs font-bold bg-indigo-100 text-indigo-900 border border-indigo-200">
-                        {item.grau_lesao}
-                      </span>
-                      <div className="text-xs text-slate-500 mt-1">{item.tempo_lesao}</div>
-                    </td>
-                    <td className="p-4 text-slate-700 font-medium">
-                      {item.localizacao_quadrante}
-                    </td>
-                    <td className="p-4">
-                      {item.foto_url ? (
-                        <a 
-                          href={item.foto_url} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 text-indigo-600 font-bold hover:underline bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-100 text-xs"
-                        >
-                          <FileImage className="w-4 h-4" /> Ver Foto
-                        </a>
-                      ) : (
-                        <span className="text-slate-400 text-xs font-medium">Sem foto</span>
-                      )}
-                    </td>
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        {/* Botão Editar */}
-                        <button
-                          onClick={() => handleAbrirEdicao(item)}
-                          title="Editar Cadastro"
-                          className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition cursor-pointer"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        
-                        {/* Botão Excluir */}
-                        <button
-                          onClick={() => handleExcluir(item.id, item.nome)}
-                          title="Excluir Cadastro"
-                          className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl border border-rose-200 transition cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DE EDIÇÃO DO PACIENTE */}
-      {pacienteEditando && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border-2 border-slate-200">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200 mb-6">
-              <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
-                <Edit className="w-5 h-5 text-indigo-600" />
-                Editar Paciente: {pacienteEditando.nome}
-              </h2>
-              <button 
-                onClick={() => setPacienteEditando(null)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition cursor-pointer"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSalvarEdicao} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Nome Completo</label>
-                  <input 
-                    type="text" 
-                    required 
-                    value={formDataEdit.nome} 
-                    onChange={(e) => setFormDataEdit({...formDataEdit, nome: e.target.value})}
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-indigo-600 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Nome Social</label>
-                  <input 
-                    type="text" 
-                    value={formDataEdit.nome_social} 
-                    onChange={(e) => setFormDataEdit({...formDataEdit, nome_social: e.target.value})}
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-indigo-600 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">WhatsApp</label>
-                  <input 
-                    type="text" 
-                    value={formDataEdit.whatsapp} 
-                    onChange={(e) => setFormDataEdit({...formDataEdit, whatsapp: e.target.value.replace(/\D/g, '')})}
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-indigo-600 focus:outline-none"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Sexo</label>
-                    <select 
-                      value={formDataEdit.sexo} 
-                      onChange={(e) => setFormDataEdit({...formDataEdit, sexo: e.target.value})}
-                      className="w-full px-2 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-indigo-600 focus:outline-none"
-                    >
-                      <option value="M">Masc</option>
-                      <option value="F">Fem</option>
-                      <option value="Outro">Outro</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Idade</label>
-                    <input 
-                      type="number" 
-                      required 
-                      value={formDataEdit.idade} 
-                      onChange={(e) => setFormDataEdit({...formDataEdit, idade: e.target.value})}
-                      className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-indigo-600 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Tipo de Diabetes</label>
-                  <select 
-                    value={formDataEdit.tipo_diabetes} 
-                    onChange={(e) => setFormDataEdit({...formDataEdit, tipo_diabetes: e.target.value})}
-                    className="w-full px-3 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-indigo-600 focus:outline-none"
-                  >
-                    <option value="Tipo 1">Tipo 1</option>
-                    <option value="Tipo 2">Tipo 2</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Grau da Lesão</label>
-                  <input 
-                    type="text" 
-                    value={formDataEdit.grau_lesao} 
-                    onChange={(e) => setFormDataEdit({...formDataEdit, grau_lesao: e.target.value})}
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-indigo-600 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Tempo da Lesão</label>
-                  <input 
-                    type="text" 
-                    value={formDataEdit.tempo_lesao} 
-                    onChange={(e) => setFormDataEdit({...formDataEdit, tempo_lesao: e.target.value})}
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-indigo-600 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Localização / Quadrante</label>
-                  <input 
-                    type="text" 
-                    value={formDataEdit.localizacao_quadrante} 
-                    onChange={(e) => setFormDataEdit({...formDataEdit, localizacao_quadrante: e.target.value})}
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-indigo-600 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-6 border-t border-slate-200 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setPacienteEditando(null)}
-                  className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-2xl border border-slate-300 transition cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={salvando}
-                  className="px-6 py-2.5 text-sm font-extrabold bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl shadow-md transition flex items-center gap-2 cursor-pointer disabled:bg-indigo-400"
-                >
-                  <Check className="w-4 h-4" />
-                  {salvando ? 'Salvando...' : 'Salvar Alterações'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    {editing && <NativeDialog title={discard ? 'Descartar alterações?' : 'Editar paciente'} onCancel={discard ? () => setDiscard(false) : requestCloseEdit} busy={busy}>
+      {discard ? <><p className="mb-5">As alterações ainda não foram salvas.</p><div className="flex flex-wrap justify-end gap-3"><button type="button" onClick={() => setDiscard(false)} className="px-4 py-3 border rounded-xl">Continuar editando</button><button type="button" onClick={closeEdit} className="px-4 py-3 bg-rose-700 text-white rounded-xl">Descartar alterações</button></div></> : <>
+        <p className="text-sm text-slate-600 mb-5">Corrija os campos destacados antes de salvar. A alteração será registrada na auditoria.</p>
+        {error && <p role="alert" className="mb-5 p-3 bg-rose-50 text-rose-800 rounded-xl">{error}</p>}
+        {Object.keys(fieldErrors).length > 0 && <p role="alert" className="mb-4 text-rose-700">Revise os campos indicados abaixo.</p>}
+        <form ref={editForm} onSubmit={saveEdit} noValidate aria-busy={busy}>
+          <fieldset disabled={busy} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <EditField name="nome" label="Nome completo *" value={draft.nome} onChange={changeField} error={fieldErrors.nome} required maxLength={150} autoComplete="name" />
+            <EditField name="nome_social" label="Nome social" value={draft.nome_social} onChange={changeField} error={fieldErrors.nome_social} maxLength={150} />
+            <EditField name="whatsapp" label="WhatsApp / telefone *" type="tel" value={draft.whatsapp} onChange={changeField} error={fieldErrors.whatsapp} required maxLength={25} autoComplete="tel" />
+            <EditField name="idade" label="Idade *" type="number" min={1} max={120} value={draft.idade} onChange={changeField} error={fieldErrors.idade} required />
+            <EditField name="sexo" label="Sexo *" options={SEX_OPTIONS} value={draft.sexo} onChange={changeField} error={fieldErrors.sexo} required />
+            <EditField name="tipo_diabetes" label="Tipo de diabetes *" options={DIABETES_OPTIONS} value={draft.tipo_diabetes} onChange={changeField} error={fieldErrors.tipo_diabetes} required />
+            <EditField name="grau_lesao" label="Grau da lesão *" options={LESION_OPTIONS} value={draft.grau_lesao} onChange={changeField} error={fieldErrors.grau_lesao} required />
+            <EditField name="tempo_lesao" label="Tempo da lesão *" value={draft.tempo_lesao} onChange={changeField} error={fieldErrors.tempo_lesao} maxLength={100} required />
+            <div className="sm:col-span-2"><EditField name="localizacao_quadrante" label="Localização no pé *" value={draft.localizacao_quadrante} onChange={changeField} error={fieldErrors.localizacao_quadrante} maxLength={150} required /></div>
+            <fieldset className="sm:col-span-2"><legend className="font-semibold mb-2">Comorbidades</legend><div className="grid sm:grid-cols-2 gap-2">{COMORBIDITY_OPTIONS.map((option) => <label key={option} className="flex items-center gap-3 min-h-11"><input type="checkbox" value={option} checked={(draft.comorbidades || []).includes(option)} onChange={(event) => setDraft((previous) => ({ ...previous, comorbidades: event.target.checked ? [...previous.comorbidades, option] : previous.comorbidades.filter((value) => value !== option) }))} className="w-5 h-5" />{option}</label>)}</div>{fieldErrors.comorbidades && <p className="text-rose-700 mt-2">{fieldErrors.comorbidades}</p>}</fieldset>
+          </fieldset>
+          <p className="mt-5 text-sm text-slate-500">{editing.consent_accepted_at ? `Aceite registrado em ${new Date(editing.consent_accepted_at).toLocaleString('pt-BR')}${editing.consent_version ? ` · versão ${editing.consent_version}` : ''}.` : 'Cadastro anterior ao registro versionado do consentimento; nenhum aceite será inventado nesta edição.'}</p>
+          <div className="mt-6 pt-5 border-t flex justify-end flex-wrap gap-3"><button type="button" disabled={busy} onClick={requestCloseEdit} className="px-4 py-3 rounded-xl border">Cancelar</button><button type="submit" disabled={busy} className="px-5 py-3 rounded-xl bg-indigo-600 text-white font-bold disabled:opacity-60">{busy ? 'Salvando…' : 'Salvar alterações'}</button></div>
+        </form>
+      </>}
+    </NativeDialog>}
+    {deleting && <NativeDialog title="Excluir cadastro?" onCancel={() => { if (!busy) { setDeleting(null); setError(''); } }} busy={busy}><p>Confirma a exclusão do cadastro de <strong>{deleting.nome}</strong> e da foto associada? Esta ação não pode ser desfeita.</p>{error && <p role="alert" className="mt-4 text-rose-700">{error}</p>}<div className="mt-6 flex justify-end flex-wrap gap-3"><button type="button" disabled={busy} onClick={() => { setDeleting(null); setError(''); }} className="px-4 py-3 border rounded-xl">Cancelar</button><button type="button" disabled={busy} onClick={deletePatient} className="px-4 py-3 rounded-xl bg-rose-700 text-white font-bold disabled:opacity-60">{busy ? 'Excluindo…' : 'Excluir cadastro e foto'}</button></div></NativeDialog>}
+  </main>;
 }

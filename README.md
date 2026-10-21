@@ -1,16 +1,32 @@
-# React + Vite
+# Tecido Nô
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Aplicação React/Vite de orientação sobre o pé diabético, cadastro de interessados e atendimento administrativo. Dados pessoais passam por Supabase Edge Functions; a autorização administrativa também é conferida no servidor e no banco.
 
-Currently, two official plugins are available:
+## Preparação
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Use Node.js 24.16.0 e npm 11.17.0. As dependências diretas e o lockfile têm versões fixadas.
 
-## React Compiler
+```sh
+npm ci
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Copie `.env.example` para `.env.local` e configure somente a URL e a chave pública `anon` do projeto de teste. Variáveis `VITE_*` são públicas. A chave `service_role` permanece exclusivamente no runtime das Edge Functions.
 
-## Expanding the ESLint configuration
+Antes de iniciar desenvolvimento conectado, confirme o projeto e o ambiente descritos em [implantação](docs/deployment.md). Não use a base de produção para testes de formulário.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```sh
+npm run lint
+npm test
+npm run build
+npm run dev
+```
+
+Os testes SQL ficam em `supabase/tests` e usam pgTAP em banco local descartável. A CI executa lint, testes Node, auditoria das dependências de runtime, build e testes de autorização do banco sem segredos de produção. Avisos de ferramentas de build são relatados separadamente para análise de alcance.
+
+## Operação
+
+- [Implantação, ambientes e administração](docs/deployment.md)
+- [Backup, restauração e resposta a incidentes](docs/restore.md)
+- [Retenção e descarte](docs/retention.md)
+
+O código de segurança só protege produção depois que migrações, funções e frontend forem publicados e verificados no mesmo ambiente. A existência deste repositório não comprova que essa publicação foi realizada.

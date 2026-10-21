@@ -1,3 +1,33 @@
 @import "tailwindcss";
 
+html { scroll-padding-top: 6rem; }
+body { min-width: 320px; }
+section[id] { scroll-margin-top: 6rem; }
 
+:focus-visible {
+  outline: 3px solid #4f46e5 !important;
+  outline-offset: 3px;
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+  z-index: 60;
+  padding: 0.75rem 1rem;
+  color: #fff;
+  background: #312e81;
+  border-radius: 0.75rem;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus { transform: translateY(0); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
