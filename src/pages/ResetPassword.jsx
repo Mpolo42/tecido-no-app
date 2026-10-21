@@ -36,7 +36,7 @@ export default function ResetPassword() {
     event.preventDefault();
     if (busy) return;
     setError('');
-    if (password.length < 12 || password.length > 128) { setError('Use uma senha com 12 a 128 caracteres. Uma frase longa e exclusiva é uma boa opção.'); return; }
+    if (password.length < 12 || password.length > 128) { setError('Use uma senha com 12 a 128 caracteres, incluindo maiúscula, minúscula, número e símbolo.'); return; }
     if (password !== confirmation) { setError('As senhas não coincidem. Confira os dois campos.'); return; }
     setBusy(true);
     try {
@@ -47,7 +47,7 @@ export default function ResetPassword() {
       if (signOutError) { setPhase('done'); return; }
       navigate('/login', { replace: true, state: { notice: 'Senha atualizada. Entre novamente com a nova senha.' } });
     } catch (updateError) {
-      setError(updateError?.code === 'same_password' ? 'Escolha uma senha diferente da senha atual.' : updateError?.code === 'weak_password' ? 'Essa senha não atende à proteção da conta. Use uma frase mais longa e exclusiva.' : 'Não foi possível atualizar a senha. O link pode ter expirado; solicite outro ou tente novamente.');
+      setError(updateError?.code === 'same_password' ? 'Escolha uma senha diferente da senha atual.' : updateError?.code === 'weak_password' ? 'Use pelo menos 12 caracteres, com maiúscula, minúscula, número e símbolo, em uma senha exclusiva.' : 'Não foi possível atualizar a senha. O link pode ter expirado; solicite outro ou tente novamente.');
     } finally { setBusy(false); }
   };
 
@@ -55,7 +55,7 @@ export default function ResetPassword() {
   return <main className="max-w-lg mx-auto my-12 p-6 sm:p-8 bg-white rounded-3xl border border-slate-200">
     <h1 className="text-2xl font-bold mb-5">Redefinir senha</h1>
     {phase === 'loading' ? <p role="status">Verificando link de recuperação…</p> : phase === 'invalid' ? <><p role="alert">Este link não está disponível ou expirou. Solicite um novo link de recuperação na página de acesso.</p><Link to="/login" className="block mt-5 underline text-indigo-700">Ir para a página de acesso</Link></> : phase === 'done' ? <p role="status">Sua senha foi atualizada. Para sua segurança, saia da conta e entre novamente com a nova senha.</p> : <>
-      <p className="mb-5 text-slate-600">Escolha uma senha exclusiva com pelo menos 12 caracteres.</p>
+      <p className="mb-5 text-slate-600">Escolha uma senha exclusiva com 12 a 128 caracteres, incluindo maiúscula, minúscula, número e símbolo.</p>
       {error && <p role="alert" className="mb-4 p-3 bg-rose-50 text-rose-800 rounded-xl">{error}</p>}
       <form onSubmit={submit} aria-busy={busy} className="space-y-5">
         <div><label htmlFor="new-password" className="block font-semibold mb-2">Nova senha</label><input id="new-password" type="password" autoComplete="new-password" minLength={12} maxLength={128} required value={password} disabled={busy} onChange={(event) => setPassword(event.target.value)} className="w-full px-4 py-3 border-2 rounded-xl" /></div>
