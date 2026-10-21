@@ -1,4 +1,3 @@
-import React from 'react';
 import { Eye, Thermometer, Activity, AlertTriangle } from 'lucide-react';
 
 export default function Sinais() {

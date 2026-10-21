@@ -1,4 +1,3 @@
-import React from 'react';
 import heroImg from '../assets/img/pes.jpeg';
 
 export default function Hero() {
@@ -27,10 +26,10 @@ export default function Hero() {
 
         <div className="relative">
           <div className="rounded-3xl overflow-hidden border-4 border-white/20 shadow-2xl bg-purple-950">
-            <img 
-              src={heroImg} 
-              alt="Atendimento Médico ao Pé Diabético" 
-              className="w-full object-cover h-80 sm:h-96" 
+            <img
+              src={heroImg}
+              alt="Atendimento Médico ao Pé Diabético"
+              className="w-full object-cover h-80 sm:h-96"
               onError={(e) => {
                 // Fallback de segurança se a imagem falhar
                 e.target.src = 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=800&q=80';

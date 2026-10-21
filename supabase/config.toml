@@ -1,0 +1,57 @@
+project_id = "tecido-no-app"
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+auto_expose_new_tables = false
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+[db.migrations]
+enabled = true
+schema_paths = []
+[db.seed]
+enabled = false
+sql_paths = []
+[studio]
+enabled = false
+[analytics]
+enabled = false
+[local_smtp]
+enabled = true
+port = 54324
+[storage]
+enabled = true
+file_size_limit = "3MiB"
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:4173"
+additional_redirect_urls = ["http://127.0.0.1:4173/redefinir-senha", "http://localhost:5173/redefinir-senha"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = false
+enable_anonymous_sign_ins = false
+minimum_password_length = 12
+password_requirements = "lower_upper_letters_digits_symbols"
+[auth.email]
+enable_signup = false
+double_confirm_changes = true
+enable_confirmations = true
+secure_password_change = true
+[auth.mfa]
+max_enrolled_factors = 3
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+[functions.patient-intake]
+verify_jwt = true
+entrypoint = "./functions/patient-intake/index.ts"
+[functions.patient-admin]
+verify_jwt = true
+entrypoint = "./functions/patient-admin/index.ts"

@@ -28,3 +28,11 @@ node_modules
 dist
 .env.production
 
+# Local deployment links and credentials are never repository artifacts.
+.env*
+!.env.example
+.vercel/
+supabase/.temp/
+supabase/.branches/
+coverage/
+
