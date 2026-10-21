@@ -2,6 +2,12 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 export const DIFFICULTY = 14;
 export const MAX_REQUEST_BYTES = 5 * 1024 * 1024;
+export function requestSource(headers) {
+  // Supabase's Cloudflare ingress supplies the client address. Forwarded
+  // proxy hops can rotate between calls and must never bind a signed receipt.
+  // A shared fallback fails closed when this trusted header is unavailable.
+  return headers.get('cf-connecting-ip')?.trim().slice(0, 200) || 'shared-ingress';
+}
 export function base64url(bytes) {
   let raw = '';
   for (const x of bytes) raw += String.fromCharCode(x);

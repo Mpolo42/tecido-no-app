@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DIFFICULTY,
   MAX_REQUEST_BYTES,
+  requestSource,
   base64url,
   unbase64url,
   fingerprint,
@@ -19,6 +20,13 @@ const secret = 'synthetic-test-secret-not-a-production-credential';
 const identity = 'a'.repeat(64);
 const issued = 1_700_000_000_000;
 let fixturePromise;
+
+test('uses the ingress client identity despite rotating or forged forwarded hops, with a shared fallback', () => {
+  assert.equal(requestSource(new Headers({ 'cf-connecting-ip': '203.0.113.11', 'x-forwarded-for': 'forged, 10.0.0.1' })), '203.0.113.11');
+  assert.equal(requestSource(new Headers({ 'cf-connecting-ip': '203.0.113.11', 'x-forwarded-for': 'other, 10.0.0.2' })), '203.0.113.11');
+  assert.equal(requestSource(new Headers({ 'x-forwarded-for': '203.0.113.99' })), 'shared-ingress');
+  assert.equal(requestSource(new Headers()), 'shared-ingress');
+});
 
 const protocolProof = (digest) => digest[0] === 0 && (digest[1] & 0xfc) === 0;
 

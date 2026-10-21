@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.2';
-import { fingerprint } from './security.js';
+import { fingerprint, requestSource } from './security.js';
 
 const url = Deno.env.get('SUPABASE_URL')!;
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -36,11 +36,9 @@ export function userClient(req: Request) {
   return createClient(url, anonKey, { global: { headers: { Authorization: req.headers.get('authorization') || '' } }, auth: { persistSession: false, autoRefreshToken: false } });
 }
 export async function requestIdentity(req: Request) {
-  // Rightmost forwarded entry is closest to the trusted ingress. Never persist
-  // raw addresses. Shared fallback and independent global budget bound abuse
-  // even when the ingress doesn't provide a client address.
-  const source = req.headers.get('x-forwarded-for')?.split(',').at(-1)?.trim().slice(0, 200) || 'shared-ingress';
-  return fingerprint(serviceKey, source);
+  // Never persist addresses. Ignore rotating proxy hops and retain an
+  // independent global quota even if the trusted client header is unavailable.
+  return fingerprint(serviceKey, requestSource(req.headers));
 }
 export function challengeSecret() { return serviceKey; }
 export async function cleanupPhotos(admin: ReturnType<typeof serviceClient>, patientId: string | null = null) {
