@@ -16,7 +16,7 @@ import {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const secret = 'synthetic-test-secret-not-a-production-credential';
-const identity = 'synthetic-fingerprint';
+const identity = 'a'.repeat(64);
 const issued = 1_700_000_000_000;
 let fixturePromise;
 

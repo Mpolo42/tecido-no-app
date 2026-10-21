@@ -1,6 +1,7 @@
 import { supabase } from '../supabaseClient';
 import { validatePhoto } from './validation';
 import { hasProof } from '../../supabase/functions/_shared/security';
+import { createSubmissionManager } from './submission';
 
 async function invoke(body) {
   const { data, error } = await supabase.functions.invoke('patient-intake', { body });
@@ -14,8 +15,9 @@ async function invoke(body) {
 }
 async function solve(challenge, onProgress) {
   const encoder = new TextEncoder();
+  const started = performance.now();
   for (let proof = 0; proof <= 10_000_000; proof++) {
-    if (Date.now() > challenge.expires) throw new Error('A verificação expirou. Tente novamente.');
+    if (performance.now() - started > 240_000) throw new Error('A verificação demorou demais. Tente novamente.');
     const digest = await crypto.subtle.digest('SHA-256', encoder.encode(challenge.nonce + ':' + proof));
     if (hasProof(new Uint8Array(digest), challenge.difficulty)) return proof;
     if (proof % 500 === 0) { onProgress?.('Verificando envio seguro…'); await new Promise((resolve) => setTimeout(resolve, 0)); }
@@ -42,13 +44,5 @@ async function encodePhoto(file) {
     return { type: 'image/jpeg', base64: btoa(raw) };
   } finally { image.close(); }
 }
-export async function submitPatient(patient, photo, website, onProgress) {
-  onProgress?.('Preparando envio…');
-  const prepared = await encodePhoto(photo);
-  const challenge = await invoke({ action: 'challenge' });
-  const proof = await solve(challenge, onProgress);
-  // The signed challenge also enforces a minimum duration server-side.
-  if (Date.now() < challenge.expires - 299_000) await new Promise((r) => setTimeout(r, 1050));
-  onProgress?.('Enviando cadastro…');
-  return invoke({ action: 'submit', patient, photo: prepared, website: website || '', token: challenge.token, proof });
-}
+const manager = createSubmissionManager({ invoke, preparePhoto: encodePhoto, solve });
+export const submitPatient = manager.submit;

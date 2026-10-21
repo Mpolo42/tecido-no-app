@@ -229,6 +229,9 @@ begin
 
   if p_stage = 'submit' then
     if p_nonce is null then return 'denied'; end if;
+    -- Serialize reservation/release/insert for the same request. The matching
+    -- BEFORE INSERT trigger also takes this lock before checking the reservation.
+    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('tecido-no:intake:' || p_nonce::text, 0));
     select identity_hash into v_previous_identity from private.intake_nonces where nonce = p_nonce;
     if found then
       if v_previous_identity <> p_identity then return 'denied'; end if;
@@ -276,6 +279,72 @@ end;
 $$;
 revoke all on function public.intake_budget(text, text, uuid) from public, anon, authenticated, service_role;
 grant execute on function public.intake_budget(text, text, uuid) to service_role;
+
+-- A signed receipt is checked by the Edge Function before this service-only RPC.
+-- The supplied identity is the identity in that signature, so a network change
+-- does not turn a successful submission into a second patient registration.
+create function public.intake_receipt(p_identity text, p_nonce uuid)
+returns text language plpgsql stable security invoker set search_path = ''
+as $$
+declare
+  v_previous_identity text;
+begin
+  if p_identity is null or p_identity !~ '^[a-f0-9]{64}$' or p_nonce is null then
+    return 'denied';
+  end if;
+  select identity_hash into v_previous_identity from private.intake_nonces where nonce = p_nonce;
+  if not found then return 'unknown'; end if;
+  if v_previous_identity <> p_identity then return 'denied'; end if;
+  if exists (select 1 from public.pacientes where intake_request_id = p_nonce) then
+    return 'completed';
+  end if;
+  return 'pending';
+end;
+$$;
+revoke all on function public.intake_receipt(text, uuid) from public, anon, authenticated, service_role;
+grant execute on function public.intake_receipt(text, uuid) to service_role;
+
+-- Release only a failed reservation, never a request whose insert committed.
+-- No quota is refunded: an unsuccessful attempt still consumed server resources.
+create function public.release_intake_nonce(p_identity text, p_nonce uuid)
+returns boolean language plpgsql security invoker set search_path = ''
+as $$
+declare
+  v_deleted uuid;
+begin
+  if p_identity is null or p_identity !~ '^[a-f0-9]{64}$' or p_nonce is null then
+    return false;
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('tecido-no:intake:' || p_nonce::text, 0));
+  delete from private.intake_nonces as reservation
+  where reservation.nonce = p_nonce and reservation.identity_hash = p_identity
+    and not exists (select 1 from public.pacientes where intake_request_id = p_nonce)
+  returning reservation.nonce into v_deleted;
+  return v_deleted is not null;
+end;
+$$;
+revoke all on function public.release_intake_nonce(text, uuid) from public, anon, authenticated, service_role;
+grant execute on function public.release_intake_nonce(text, uuid) to service_role;
+
+-- An insert that was still in flight when a failed HTTP request released its
+-- reservation must fail instead of committing without a reconcilable receipt.
+-- This function runs as the inserting role; only service_role may insert rows.
+create function private.lock_intake_request()
+returns trigger language plpgsql security invoker set search_path = ''
+as $$
+begin
+  if new.intake_request_id is not null then
+    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('tecido-no:intake:' || new.intake_request_id::text, 0));
+    if not exists (select 1 from private.intake_nonces where nonce = new.intake_request_id) then
+      raise exception 'Intake request is not reserved' using errcode = '23514';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function private.lock_intake_request() from public, anon, authenticated, service_role;
+create trigger pacientes_require_intake_reservation before insert on public.pacientes
+  for each row execute function private.lock_intake_request();
 
 create function public.queue_photo_cleanup(p_path text, p_patient_id bigint default null, p_reason text default 'failed_upload', p_delay_seconds integer default 0)
 returns void language plpgsql security invoker set search_path = ''
