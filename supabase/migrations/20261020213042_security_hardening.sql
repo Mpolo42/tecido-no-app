@@ -220,6 +220,7 @@ declare
   v_count integer;
   v_nonce uuid;
   v_previous_identity text;
+  v_reserved_at timestamptz;
 begin
   if p_identity is null or p_identity !~ '^[a-f0-9]{64}$' or p_stage not in ('challenge', 'submit') or p_stage is null then
     return 'denied';
@@ -232,11 +233,16 @@ begin
     -- Serialize reservation/release/insert for the same request. The matching
     -- BEFORE INSERT trigger also takes this lock before checking the reservation.
     perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('tecido-no:intake:' || p_nonce::text, 0));
-    select identity_hash into v_previous_identity from private.intake_nonces where nonce = p_nonce;
+    select identity_hash, created_at into v_previous_identity, v_reserved_at
+      from private.intake_nonces where nonce = p_nonce;
     if found then
       if v_previous_identity <> p_identity then return 'denied'; end if;
       if exists (select 1 from public.pacientes where intake_request_id = p_nonce) then return 'completed'; end if;
-      return 'pending';
+      if v_reserved_at > v_now - interval '10 minutes' then return 'pending'; end if;
+      -- A dead worker must not leave a form pending for the full receipt-retention
+      -- period. Reclaim its expired lease under the same advisory lock and charge
+      -- normal retry quotas while preserving the original request UUID.
+      delete from private.intake_nonces where nonce = p_nonce and identity_hash = p_identity;
     end if;
     if exists (select 1 from public.pacientes where intake_request_id = p_nonce) then return 'completed'; end if;
     -- The unique nonce serializes simultaneous submissions of the same form.
@@ -288,16 +294,19 @@ returns text language plpgsql stable security invoker set search_path = ''
 as $$
 declare
   v_previous_identity text;
+  v_reserved_at timestamptz;
 begin
   if p_identity is null or p_identity !~ '^[a-f0-9]{64}$' or p_nonce is null then
     return 'denied';
   end if;
-  select identity_hash into v_previous_identity from private.intake_nonces where nonce = p_nonce;
+  select identity_hash, created_at into v_previous_identity, v_reserved_at
+    from private.intake_nonces where nonce = p_nonce;
   if not found then return 'unknown'; end if;
   if v_previous_identity <> p_identity then return 'denied'; end if;
   if exists (select 1 from public.pacientes where intake_request_id = p_nonce) then
     return 'completed';
   end if;
+  if v_reserved_at <= now() - interval '10 minutes' then return 'unknown'; end if;
   return 'pending';
 end;
 $$;
@@ -407,4 +416,4 @@ grant execute on function public.finish_photo_cleanup(bigint, boolean) to servic
 comment on column public.pacientes.foto_path is 'Private fotos-lesoes bucket object path; resolve with a short-lived signed URL after AAL2 authorization.';
 comment on column public.pacientes.consent_accepted_at is 'Server-recorded acceptance time for new intake. Null for historical records without this evidence.';
 comment on table private.patient_audit_events is 'Administrative audit metadata only: no names, phone numbers, images, or clinical payloads.';
-comment on table private.intake_nonces is 'Idempotency reservation, stores only random nonce and keyed identity hash; expires after seven days.';
+comment on table private.intake_nonces is 'Idempotency reservation with a ten-minute pending lease, retained up to seven days for completed receipts; stores only random nonce, keyed identity hash and reservation time.';

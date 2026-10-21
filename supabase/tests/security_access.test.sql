@@ -101,6 +101,10 @@ select is((select count(*) from private.patient_audit_events where patient_id = 
 -- No production identities or raw IP addresses are used in budget tests.
 delete from private.intake_rate_buckets;
 delete from private.intake_nonces;
+insert into private.intake_nonces (nonce, identity_hash, created_at) values
+  ('66666666-6666-4666-8666-666666666661', repeat('b',64), now() - interval '11 minutes'),
+  ('66666666-6666-4666-8666-666666666662', repeat('b',64), now() - interval '10 minutes'),
+  ('66666666-6666-4666-8666-666666666663', repeat('b',64), now() - interval '9 minutes');
 set local role service_role;
 set local request.jwt.claims = '{"role":"service_role"}';
 select is(public.intake_budget('raw-ip-is-not-accepted', 'challenge'), 'denied', 'budget refuses raw IP identity input');
@@ -125,6 +129,16 @@ select is((select requests from private.intake_rate_buckets where scope = 'ident
 select throws_ok($$insert into public.pacientes (nome, sexo, idade, tipo_diabetes, grau_lesao, tempo_lesao, localizacao_quadrante, whatsapp, termo_consentimento, intake_request_id) values ('Envio Sintético Liberado', 'M', 40, 'Tipo 1', 'Grau 1', '2 dias', 'Pé direito', '85999999999', true, '55555555-5555-4555-8555-555555555551')$$, '23514', 'Intake request is not reserved', 'insert arriving after release cannot commit without a receipt reservation');
 select is(public.intake_budget(repeat('a',64), 'submit', '55555555-5555-4555-8555-555555555551'), 'allowed', 'explicit retry may reuse the released stable request ID');
 select is(public.intake_receipt(repeat('a',64), '55555555-5555-4555-8555-555555555551'), 'pending', 'retry has one shared pending reservation');
+select is(public.intake_receipt(repeat('b',64), '66666666-6666-4666-8666-666666666663'), 'pending', 'a lease younger than ten minutes remains pending');
+select is(public.intake_budget(repeat('b',64), 'submit', '66666666-6666-4666-8666-666666666663'), 'pending', 'a live worker lease cannot be claimed by a retry');
+select is(public.intake_receipt(repeat('b',64), '66666666-6666-4666-8666-666666666661'), 'unknown', 'a dead worker lease becomes unknown after ten minutes');
+select is(public.intake_receipt(repeat('b',64), '66666666-6666-4666-8666-666666666662'), 'unknown', 'the ten-minute lease boundary is expired');
+select is(public.intake_budget(repeat('c',64), 'submit', '66666666-6666-4666-8666-666666666661'), 'denied', 'an expired lease cannot be reassigned to a different identity');
+select is(public.intake_budget(repeat('b',64), 'submit', '66666666-6666-4666-8666-666666666661'), 'allowed', 'matching retry reclaims an expired lease using the same request UUID');
+select ok((select created_at >= now() from private.intake_nonces where nonce = '66666666-6666-4666-8666-666666666661' and identity_hash = repeat('b',64)), 'reclaimed lease has a new reservation timestamp');
+select is(public.intake_receipt(repeat('b',64), '66666666-6666-4666-8666-666666666661'), 'pending', 'receipt observes the renewed lease under the original UUID');
+select is(public.intake_budget(repeat('b',64), 'submit', '66666666-6666-4666-8666-666666666661'), 'pending', 'another retry cannot immediately reclaim the renewed lease');
+select is((select requests from private.intake_rate_buckets where scope = 'identity' and bucket_key = repeat('b',64) and stage = 'submit'), 1, 'reclaiming a dead worker consumes normal retry quota once');
 select is(public.intake_budget(repeat('a', 64), 'challenge'), 'allowed', 'first challenge consumes one budget unit');
 do $$ begin for counter in 1..19 loop perform public.intake_budget(repeat('a', 64), 'challenge'); end loop; end $$;
 select is(public.intake_budget(repeat('a', 64), 'challenge'), 'denied', '21st challenge for an identity in the hour is denied');
@@ -143,6 +157,15 @@ select is(public.intake_receipt(repeat('d',64), '33333333-3333-4333-8333-3333333
 select is(public.intake_receipt(repeat('e',64), '33333333-3333-4333-8333-333333333331'), 'denied', 'completed receipt remains bound to the signed identity');
 select is(public.release_intake_nonce(repeat('d',64), '33333333-3333-4333-8333-333333333331'), false, 'release never removes a reservation whose patient insert committed');
 select is(public.intake_receipt(repeat('d',64), '33333333-3333-4333-8333-333333333331'), 'completed', 'completed receipt remains reconcilable after a release attempt');
+reset role;
+update private.intake_nonces set created_at = now() - interval '1 hour' where nonce = '33333333-3333-4333-8333-333333333331';
+set local role service_role;
+set local request.jwt.claims = '{"role":"service_role"}';
+select is(public.intake_receipt(repeat('d',64), '33333333-3333-4333-8333-333333333331'), 'completed', 'a completed receipt is preserved even after its pending lease would expire');
+select is(public.intake_budget(repeat('d',64), 'submit', '33333333-3333-4333-8333-333333333331'), 'completed', 'retry never reclaims an old nonce whose patient already exists');
+select is(public.release_intake_nonce(repeat('d',64), '33333333-3333-4333-8333-333333333331'), false, 'an old completed reservation cannot be released');
+select is((select count(*) from private.intake_nonces where nonce = '33333333-3333-4333-8333-333333333331' and created_at = now() - interval '1 hour'), 1::bigint, 'completed reservation timestamp and identity remain untouched');
+select throws_ok($$insert into public.pacientes (nome, sexo, idade, tipo_diabetes, grau_lesao, tempo_lesao, localizacao_quadrante, whatsapp, termo_consentimento, intake_request_id) values ('Worker Sintético Tardio', 'M', 40, 'Tipo 1', 'Grau 1', '2 dias', 'Pé direito', '85999999999', true, '33333333-3333-4333-8333-333333333331')$$, '23505', null, 'unique request UUID prevents a late worker from duplicating a completed patient');
 select is((select requests from private.intake_rate_buckets where scope = 'identity' and bucket_key = repeat('d', 64) and stage = 'submit'), 1, 'duplicate nonce does not consume additional budget');
 do $$ begin for counter in 2..5 loop perform public.intake_budget(repeat('d', 64), 'submit', ('33333333-3333-4333-8333-' || lpad(counter::text,12,'0'))::uuid); end loop; end $$;
 select is(public.intake_budget(repeat('d', 64), 'submit', '33333333-3333-4333-8333-333333333339'), 'denied', 'sixth hourly submission for an identity is denied');
